@@ -12,6 +12,7 @@ import 'history_screen.dart';
 import 'results_screen.dart';
 import 'statistics/statistics_screen.dart';
 import 'weapons/my_weapons_screen.dart';
+import 'workshop/workshop_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -69,6 +70,14 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
       MaterialPageRoute(builder: (context) => const MyWeaponsScreen()),
     );
+  }
+
+  void _navigateToWorkshop() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const WorkshopScreen()),
+    );
+    _loadSessions();
   }
 
   Future<void> _handleLogout() async {
@@ -372,26 +381,55 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 10),
 
-          // Bouton Arsenal
-          OutlinedButton.icon(
-            onPressed: _navigateToMyWeapons,
-            icon: const Icon(Icons.settings_applications_outlined, size: 18),
-            label: const Text(
-              '◈ ARSENAL',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.5,
+          // Boutons Arsenal + Atelier côte à côte
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _navigateToMyWeapons,
+                  icon: const Icon(Icons.settings_applications_outlined, size: 16),
+                  label: const Text(
+                    '◈ ARSENAL',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.accentPrimary,
+                    minimumSize: const Size(0, 44),
+                    side: const BorderSide(color: AppTheme.accentPrimary, width: 1),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                  ),
+                ),
               ),
-            ),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppTheme.accentPrimary,
-              minimumSize: const Size(double.infinity, 44),
-              side: const BorderSide(color: AppTheme.accentPrimary, width: 1),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(6),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _navigateToWorkshop,
+                  icon: const Icon(Icons.construction_outlined, size: 16),
+                  label: const Text(
+                    '⚙ ATELIER',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.accentSecondary,
+                    minimumSize: const Size(0, 44),
+                    side: const BorderSide(color: AppTheme.accentSecondary, width: 1),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
         ],
       ),
