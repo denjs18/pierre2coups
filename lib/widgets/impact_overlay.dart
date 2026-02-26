@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:math';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../models/impact.dart';
 import '../models/target.dart';
@@ -44,10 +45,10 @@ class ImpactOverlay extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             // Image de fond
-            Image.file(
-              File(imagePath),
-              fit: BoxFit.contain,
-            ),
+            if (kIsWeb)
+              Image.network(imagePath, fit: BoxFit.contain)
+            else
+              Image.file(File(imagePath), fit: BoxFit.contain),
 
             // Overlay des impacts et du centre
             CustomPaint(

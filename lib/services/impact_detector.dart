@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:math';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:image/image.dart' as img;
+import 'package:image_picker/image_picker.dart' show XFile;
 import '../models/impact.dart';
 import '../models/target.dart';
 
@@ -23,9 +25,10 @@ class ImpactDetector {
     int sessionId = 0,
   }) async {
     try {
-      // Charger l'image
-      final imageFile = File(imagePath);
-      final bytes = await imageFile.readAsBytes();
+      // Charger l'image (XFile fonctionne aussi bien sur web que natif)
+      final bytes = kIsWeb
+          ? await XFile(imagePath).readAsBytes()
+          : await File(imagePath).readAsBytes();
       final image = img.decodeImage(bytes);
 
       if (image == null) {

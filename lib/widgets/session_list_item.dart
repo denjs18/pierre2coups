@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../models/session.dart';
 
@@ -11,6 +12,26 @@ class SessionListItem extends StatelessWidget {
     required this.session,
     required this.onTap,
   }) : super(key: key);
+
+  Widget _buildThumbnail(String imagePath) {
+    if (kIsWeb) {
+      return Container(
+        color: Colors.grey[300],
+        child: const Icon(Icons.image, size: 40, color: Colors.grey),
+      );
+    }
+    final file = File(imagePath);
+    return file.existsSync()
+        ? Image.file(file, fit: BoxFit.cover)
+        : Container(
+            color: Colors.grey[300],
+            child: const Icon(
+              Icons.image_not_supported,
+              size: 40,
+              color: Colors.grey,
+            ),
+          );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -33,19 +54,7 @@ class SessionListItem extends StatelessWidget {
                 child: SizedBox(
                   width: 80,
                   height: 80,
-                  child: File(session.imagePath).existsSync()
-                      ? Image.file(
-                          File(session.imagePath),
-                          fit: BoxFit.cover,
-                        )
-                      : Container(
-                          color: Colors.grey[300],
-                          child: const Icon(
-                            Icons.image_not_supported,
-                            size: 40,
-                            color: Colors.grey,
-                          ),
-                        ),
+                  child: _buildThumbnail(session.imagePath),
                 ),
               ),
               const SizedBox(width: 16),

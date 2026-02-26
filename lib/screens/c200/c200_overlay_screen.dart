@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../../models/impact.dart';
 import '../../models/c200_scoring.dart';
@@ -113,10 +114,10 @@ class _C200OverlayScreenState extends State<C200OverlayScreen> {
                   fit: StackFit.expand,
                   children: [
                     // Image de fond
-                    Image.file(
-                      File(widget.imagePath),
-                      fit: BoxFit.contain,
-                    ),
+                    if (kIsWeb)
+                      Image.network(widget.imagePath, fit: BoxFit.contain)
+                    else
+                      Image.file(File(widget.imagePath), fit: BoxFit.contain),
 
                     // Overlay C200
                     CustomPaint(

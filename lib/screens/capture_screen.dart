@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -14,6 +16,7 @@ class CaptureScreen extends StatefulWidget {
 
 class _CaptureScreenState extends State<CaptureScreen> {
   File? _imageFile;
+  String? _webImagePath; // Blob URL pour le web
   final ImagePicker _picker = ImagePicker();
   bool _isProcessing = false;
 
@@ -51,22 +54,25 @@ class _CaptureScreenState extends State<CaptureScreen> {
     setState(() => _isProcessing = true);
 
     try {
-      // Créer un nom de fichier unique
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final fileName = 'session_$timestamp.jpg';
-
-      // Obtenir le répertoire de stockage
-      final appDir = await getApplicationDocumentsDirectory();
-      final savedPath = path.join(appDir.path, fileName);
-
-      // Copier l'image
-      final File imageFile = File(xFile.path);
-      await imageFile.copy(savedPath);
-
-      setState(() {
-        _imageFile = File(savedPath);
-        _isProcessing = false;
-      });
+      if (kIsWeb) {
+        // Sur web : utiliser le chemin blob URL directement
+        setState(() {
+          _webImagePath = xFile.path;
+          _isProcessing = false;
+        });
+      } else {
+        // Sur natif : copier dans le répertoire documents
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final fileName = 'session_$timestamp.jpg';
+        final appDir = await getApplicationDocumentsDirectory();
+        final savedPath = path.join(appDir.path, fileName);
+        final File imageFile = File(xFile.path);
+        await imageFile.copy(savedPath);
+        setState(() {
+          _imageFile = File(savedPath);
+          _isProcessing = false;
+        });
+      }
     } catch (e) {
       setState(() => _isProcessing = false);
       _showError('Erreur lors de la sauvegarde: $e');
@@ -83,19 +89,25 @@ class _CaptureScreenState extends State<CaptureScreen> {
   }
 
   void _analyzeImage() {
-    if (_imageFile != null) {
+    final imagePath = kIsWeb ? _webImagePath : _imageFile?.path;
+    if (imagePath != null) {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => AnalysisScreen(imagePath: _imageFile!.path),
+          builder: (context) => AnalysisScreen(imagePath: imagePath),
         ),
       );
     }
   }
 
   void _retakePhoto() {
-    setState(() => _imageFile = null);
+    setState(() {
+      _imageFile = null;
+      _webImagePath = null;
+    });
   }
+
+  bool get _hasImage => kIsWeb ? _webImagePath != null : _imageFile != null;
 
   @override
   Widget build(BuildContext context) {
@@ -116,15 +128,16 @@ class _CaptureScreenState extends State<CaptureScreen> {
                 ],
               ),
             )
-          : _imageFile == null
+          : !_hasImage
               ? _buildCaptureOptions()
               : _buildImagePreview(),
     );
   }
 
   Widget _buildCaptureOptions() {
-    // Sur Windows, la caméra n'est pas disponible
-    final bool isCameraAvailable = !Platform.isWindows;
+    // Caméra disponible sauf sur Windows desktop et web
+    final bool isCameraAvailable = !kIsWeb &&
+        defaultTargetPlatform != TargetPlatform.windows;
 
     return Center(
       child: Padding(
@@ -170,9 +183,11 @@ class _CaptureScreenState extends State<CaptureScreen> {
             OutlinedButton.icon(
               onPressed: _pickFromGallery,
               icon: const Icon(Icons.photo_library, size: 28),
-              label: const Text(
-                'Importer depuis la galerie',
-                style: TextStyle(fontSize: 18),
+              label: Text(
+                kIsWeb
+                    ? 'Sélectionner une image'
+                    : 'Importer depuis la galerie',
+                style: const TextStyle(fontSize: 18),
               ),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.orange[800],
@@ -193,15 +208,17 @@ class _CaptureScreenState extends State<CaptureScreen> {
   }
 
   Widget _buildImagePreview() {
+    final Widget imageWidget = kIsWeb
+        ? Image.network(_webImagePath!)
+        : Image.file(_imageFile!);
+
     return Column(
       children: [
         Expanded(
           child: InteractiveViewer(
             minScale: 0.5,
             maxScale: 4.0,
-            child: Center(
-              child: Image.file(_imageFile!),
-            ),
+            child: Center(child: imageWidget),
           ),
         ),
         Container(

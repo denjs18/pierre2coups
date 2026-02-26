@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../database/database_helper.dart';
 import '../models/session.dart';
@@ -7,7 +9,6 @@ import 'history_screen.dart';
 import 'results_screen.dart';
 import 'statistics/statistics_screen.dart';
 import 'weapons/my_weapons_screen.dart';
-import 'dart:io';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -364,6 +365,25 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _buildSessionThumbnail(String imagePath) {
+    if (kIsWeb) {
+      return Container(
+        color: AppTheme.backgroundPrimary,
+        child: const Icon(Icons.image, color: AppTheme.textSecondary),
+      );
+    }
+    final file = File(imagePath);
+    return file.existsSync()
+        ? Image.file(file, fit: BoxFit.cover)
+        : Container(
+            color: AppTheme.backgroundPrimary,
+            child: const Icon(
+              Icons.image_not_supported,
+              color: AppTheme.textSecondary,
+            ),
+          );
+  }
+
   Widget _buildSessionCard(Session session) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -400,18 +420,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: SizedBox(
                     width: 80,
                     height: 80,
-                    child: File(session.imagePath).existsSync()
-                        ? Image.file(
-                            File(session.imagePath),
-                            fit: BoxFit.cover,
-                          )
-                        : Container(
-                            color: AppTheme.backgroundPrimary,
-                            child: const Icon(
-                              Icons.image_not_supported,
-                              color: AppTheme.textSecondary,
-                            ),
-                          ),
+                    child: _buildSessionThumbnail(session.imagePath),
                   ),
                 ),
                 const SizedBox(width: 16),

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../database/database_helper.dart';
@@ -70,8 +71,10 @@ class _ResultsScreenState extends State<ResultsScreen> {
   Future<void> _loadImageSize() async {
     if (widget.imagePath == null) return;
 
-    final image = Image.file(File(widget.imagePath!));
-    final completer = image.image.resolve(const ImageConfiguration());
+    final ImageProvider provider = kIsWeb
+        ? (NetworkImage(widget.imagePath!) as ImageProvider)
+        : FileImage(File(widget.imagePath!));
+    final completer = provider.resolve(const ImageConfiguration());
     completer.addListener(ImageStreamListener((info, _) {
       if (mounted) {
         setState(() {
@@ -372,8 +375,8 @@ class _ResultsScreenState extends State<ResultsScreen> {
     if (confirmed == true && widget.sessionId != null) {
       await DatabaseHelper.instance.deleteSession(widget.sessionId!);
 
-      // Supprimer l'image
-      if (_session?.imagePath != null) {
+      // Supprimer l'image (pas applicable sur web)
+      if (!kIsWeb && _session?.imagePath != null) {
         try {
           final file = File(_session!.imagePath);
           if (await file.exists()) {

@@ -1,4 +1,5 @@
-import 'dart:io';
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
@@ -11,6 +12,12 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
   static Database? _database;
 
+  // Stockage en mémoire pour le web (pas de persistance)
+  static final List<Map<String, dynamic>> _webSessions = [];
+  static final List<Map<String, dynamic>> _webImpacts = [];
+  static final List<Map<String, dynamic>> _webCalibrations = [];
+  static int _webNextId = 1;
+
   DatabaseHelper._internal();
 
   Future<Database> get database async {
@@ -20,16 +27,17 @@ class DatabaseHelper {
   }
 
   Future<Database> _initDatabase() async {
-    // Initialiser sqflite_ffi pour Windows, Linux et macOS
-    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    if (defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux ||
+        defaultTargetPlatform == TargetPlatform.macOS) {
       sqfliteFfiInit();
       databaseFactory = databaseFactoryFfi;
     }
 
-    Directory documentsDirectory = await getApplicationDocumentsDirectory();
-    String path = join(documentsDirectory.path, 'pierre2coups.db');
+    final documentsDirectory = await getApplicationDocumentsDirectory();
+    final dbPath = join(documentsDirectory.path, 'pierre2coups.db');
     return await openDatabase(
-      path,
+      dbPath,
       version: 2,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
@@ -37,7 +45,6 @@ class DatabaseHelper {
   }
 
   Future<void> _onCreate(Database db, int version) async {
-    // Table sessions étendue
     await db.execute('''
       CREATE TABLE sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,7 +103,6 @@ class DatabaseHelper {
       )
     ''');
 
-    // Nouvelles tables
     await db.execute('''
       CREATE TABLE users (
         id TEXT PRIMARY KEY,
@@ -158,9 +164,9 @@ class DatabaseHelper {
       )
     ''');
 
-    // Créer des index pour améliorer les performances
     await db.execute('CREATE INDEX idx_sessions_user ON sessions(user_id)');
-    await db.execute('CREATE INDEX idx_sessions_firestore ON sessions(firestore_id)');
+    await db.execute(
+        'CREATE INDEX idx_sessions_firestore ON sessions(firestore_id)');
     await db.execute('CREATE INDEX idx_sessions_sync ON sessions(sync_status)');
     await db.execute('CREATE INDEX idx_weapons_name ON weapons(name)');
     await db.execute('CREATE INDEX idx_clubs_name ON clubs(name, city)');
@@ -168,7 +174,6 @@ class DatabaseHelper {
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      // Ajouter les nouvelles colonnes aux tables existantes
       await db.execute('ALTER TABLE sessions ADD COLUMN firestore_id TEXT');
       await db.execute('ALTER TABLE sessions ADD COLUMN user_id TEXT');
       await db.execute('ALTER TABLE sessions ADD COLUMN weapon_id TEXT');
@@ -178,19 +183,23 @@ class DatabaseHelper {
       await db.execute('ALTER TABLE sessions ADD COLUMN c200_score REAL');
       await db.execute('ALTER TABLE sessions ADD COLUMN c200_details TEXT');
       await db.execute('ALTER TABLE sessions ADD COLUMN updated_at TEXT');
-      await db.execute('ALTER TABLE sessions ADD COLUMN sync_status TEXT DEFAULT \'pending\'');
-      await db.execute('ALTER TABLE sessions ADD COLUMN is_migrated INTEGER DEFAULT 0');
+      await db.execute(
+          'ALTER TABLE sessions ADD COLUMN sync_status TEXT DEFAULT \'pending\'');
+      await db.execute(
+          'ALTER TABLE sessions ADD COLUMN is_migrated INTEGER DEFAULT 0');
 
       await db.execute('ALTER TABLE impacts ADD COLUMN firestore_id TEXT');
       await db.execute('ALTER TABLE impacts ADD COLUMN c200_zone INTEGER');
       await db.execute('ALTER TABLE impacts ADD COLUMN c200_points REAL');
-      await db.execute('ALTER TABLE impacts ADD COLUMN distance_from_center REAL');
+      await db.execute(
+          'ALTER TABLE impacts ADD COLUMN distance_from_center REAL');
 
-      await db.execute('ALTER TABLE calibration ADD COLUMN c200_center_x REAL');
-      await db.execute('ALTER TABLE calibration ADD COLUMN c200_center_y REAL');
+      await db
+          .execute('ALTER TABLE calibration ADD COLUMN c200_center_x REAL');
+      await db
+          .execute('ALTER TABLE calibration ADD COLUMN c200_center_y REAL');
       await db.execute('ALTER TABLE calibration ADD COLUMN c200_scale REAL');
 
-      // Créer les nouvelles tables
       await db.execute('''
         CREATE TABLE users (
           id TEXT PRIMARY KEY,
@@ -252,10 +261,11 @@ class DatabaseHelper {
         )
       ''');
 
-      // Créer des index
       await db.execute('CREATE INDEX idx_sessions_user ON sessions(user_id)');
-      await db.execute('CREATE INDEX idx_sessions_firestore ON sessions(firestore_id)');
-      await db.execute('CREATE INDEX idx_sessions_sync ON sessions(sync_status)');
+      await db.execute(
+          'CREATE INDEX idx_sessions_firestore ON sessions(firestore_id)');
+      await db
+          .execute('CREATE INDEX idx_sessions_sync ON sessions(sync_status)');
       await db.execute('CREATE INDEX idx_weapons_name ON weapons(name)');
       await db.execute('CREATE INDEX idx_clubs_name ON clubs(name, city)');
     }
@@ -264,12 +274,24 @@ class DatabaseHelper {
   // SESSIONS
 
   Future<int> insertSession(Session session) async {
-    Database db = await database;
+    if (kIsWeb) {
+      final id = _webNextId++;
+      final map = Map<String, dynamic>.from(session.toMap());
+      map['id'] = id;
+      _webSessions.add(map);
+      return id;
+    }
+    final db = await database;
     return await db.insert('sessions', session.toMap());
   }
 
   Future<List<Session>> getAllSessions() async {
-    Database db = await database;
+    if (kIsWeb) {
+      return _webSessions.reversed
+          .map((m) => Session.fromMap(m))
+          .toList();
+    }
+    final db = await database;
     final List<Map<String, dynamic>> maps = await db.query(
       'sessions',
       orderBy: 'created_at DESC',
@@ -278,7 +300,12 @@ class DatabaseHelper {
   }
 
   Future<Session?> getSession(int id) async {
-    Database db = await database;
+    if (kIsWeb) {
+      final maps =
+          _webSessions.where((m) => m['id'] == id).toList();
+      return maps.isEmpty ? null : Session.fromMap(maps.first);
+    }
+    final db = await database;
     final List<Map<String, dynamic>> maps = await db.query(
       'sessions',
       where: 'id = ?',
@@ -289,7 +316,16 @@ class DatabaseHelper {
   }
 
   Future<int> updateSession(Session session) async {
-    Database db = await database;
+    if (kIsWeb) {
+      final idx =
+          _webSessions.indexWhere((m) => m['id'] == session.id);
+      if (idx >= 0) {
+        _webSessions[idx] = Map<String, dynamic>.from(session.toMap())
+          ..['id'] = session.id;
+      }
+      return idx >= 0 ? 1 : 0;
+    }
+    final db = await database;
     return await db.update(
       'sessions',
       session.toMap(),
@@ -299,27 +335,41 @@ class DatabaseHelper {
   }
 
   Future<int> deleteSession(int id) async {
-    Database db = await database;
-
-    // Supprimer d'abord les impacts associés
+    if (kIsWeb) {
+      _webImpacts.removeWhere((m) => m['session_id'] == id);
+      _webCalibrations.removeWhere((m) => m['session_id'] == id);
+      final before = _webSessions.length;
+      _webSessions.removeWhere((m) => m['id'] == id);
+      return before - _webSessions.length;
+    }
+    final db = await database;
     await db.delete('impacts', where: 'session_id = ?', whereArgs: [id]);
-
-    // Supprimer la calibration associée
     await db.delete('calibration', where: 'session_id = ?', whereArgs: [id]);
-
-    // Supprimer la session
     return await db.delete('sessions', where: 'id = ?', whereArgs: [id]);
   }
 
   // IMPACTS
 
   Future<int> insertImpact(Impact impact) async {
-    Database db = await database;
+    if (kIsWeb) {
+      final id = _webNextId++;
+      final map = Map<String, dynamic>.from(impact.toMap());
+      map['id'] = id;
+      _webImpacts.add(map);
+      return id;
+    }
+    final db = await database;
     return await db.insert('impacts', impact.toMap());
   }
 
   Future<List<Impact>> getImpactsForSession(int sessionId) async {
-    Database db = await database;
+    if (kIsWeb) {
+      return _webImpacts
+          .where((m) => m['session_id'] == sessionId)
+          .map((m) => Impact.fromMap(m))
+          .toList();
+    }
+    final db = await database;
     final List<Map<String, dynamic>> maps = await db.query(
       'impacts',
       where: 'session_id = ?',
@@ -329,17 +379,34 @@ class DatabaseHelper {
   }
 
   Future<int> deleteImpact(int id) async {
-    Database db = await database;
+    if (kIsWeb) {
+      final before = _webImpacts.length;
+      _webImpacts.removeWhere((m) => m['id'] == id);
+      return before - _webImpacts.length;
+    }
+    final db = await database;
     return await db.delete('impacts', where: 'id = ?', whereArgs: [id]);
   }
 
   Future<void> deleteImpactsForSession(int sessionId) async {
-    Database db = await database;
+    if (kIsWeb) {
+      _webImpacts.removeWhere((m) => m['session_id'] == sessionId);
+      return;
+    }
+    final db = await database;
     await db.delete('impacts', where: 'session_id = ?', whereArgs: [sessionId]);
   }
 
   Future<int> updateImpact(Impact impact) async {
-    Database db = await database;
+    if (kIsWeb) {
+      final idx = _webImpacts.indexWhere((m) => m['id'] == impact.id);
+      if (idx >= 0) {
+        _webImpacts[idx] = Map<String, dynamic>.from(impact.toMap())
+          ..['id'] = impact.id;
+      }
+      return idx >= 0 ? 1 : 0;
+    }
+    final db = await database;
     return await db.update(
       'impacts',
       impact.toMap(),
@@ -351,12 +418,24 @@ class DatabaseHelper {
   // CALIBRATION
 
   Future<int> insertCalibration(TargetCalibration calibration) async {
-    Database db = await database;
+    if (kIsWeb) {
+      final id = _webNextId++;
+      final map = Map<String, dynamic>.from(calibration.toMap());
+      map['id'] = id;
+      _webCalibrations.add(map);
+      return id;
+    }
+    final db = await database;
     return await db.insert('calibration', calibration.toMap());
   }
 
   Future<TargetCalibration?> getCalibrationForSession(int sessionId) async {
-    Database db = await database;
+    if (kIsWeb) {
+      final maps =
+          _webCalibrations.where((m) => m['session_id'] == sessionId).toList();
+      return maps.isEmpty ? null : TargetCalibration.fromMap(maps.first);
+    }
+    final db = await database;
     final List<Map<String, dynamic>> maps = await db.query(
       'calibration',
       where: 'session_id = ?',
@@ -367,7 +446,17 @@ class DatabaseHelper {
   }
 
   Future<int> updateCalibration(TargetCalibration calibration) async {
-    Database db = await database;
+    if (kIsWeb) {
+      final idx =
+          _webCalibrations.indexWhere((m) => m['id'] == calibration.id);
+      if (idx >= 0) {
+        _webCalibrations[idx] =
+            Map<String, dynamic>.from(calibration.toMap())
+              ..['id'] = calibration.id;
+      }
+      return idx >= 0 ? 1 : 0;
+    }
+    final db = await database;
     return await db.update(
       'calibration',
       calibration.toMap(),
@@ -377,45 +466,48 @@ class DatabaseHelper {
   }
 
   Future<void> deleteCalibrationForSession(int sessionId) async {
-    Database db = await database;
-    await db.delete('calibration', where: 'session_id = ?', whereArgs: [sessionId]);
+    if (kIsWeb) {
+      _webCalibrations.removeWhere((m) => m['session_id'] == sessionId);
+      return;
+    }
+    final db = await database;
+    await db.delete('calibration',
+        where: 'session_id = ?', whereArgs: [sessionId]);
   }
 
   // USERS
 
   Future<void> saveUser(Map<String, dynamic> user) async {
-    Database db = await database;
-    await db.insert(
-      'users',
-      user,
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    if (kIsWeb) return;
+    final db = await database;
+    await db.insert('users', user, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<Map<String, dynamic>?> getCurrentUser() async {
-    Database db = await database;
+    if (kIsWeb) return null;
+    final db = await database;
     final List<Map<String, dynamic>> maps = await db.query('users', limit: 1);
     return maps.isEmpty ? null : maps.first;
   }
 
   Future<void> deleteUser() async {
-    Database db = await database;
+    if (kIsWeb) return;
+    final db = await database;
     await db.delete('users');
   }
 
   // CLUBS
 
   Future<void> saveClub(Map<String, dynamic> club) async {
-    Database db = await database;
-    await db.insert(
-      'clubs',
-      club,
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    if (kIsWeb) return;
+    final db = await database;
+    await db.insert('clubs', club,
+        conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<Map<String, dynamic>?> getClubById(String id) async {
-    Database db = await database;
+    if (kIsWeb) return null;
+    final db = await database;
     final List<Map<String, dynamic>> maps = await db.query(
       'clubs',
       where: 'id = ?',
@@ -425,7 +517,8 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> searchClubs(String query) async {
-    Database db = await database;
+    if (kIsWeb) return [];
+    final db = await database;
     return await db.query(
       'clubs',
       where: 'name LIKE ? OR city LIKE ?',
@@ -437,16 +530,15 @@ class DatabaseHelper {
   // WEAPONS
 
   Future<void> saveWeapon(Map<String, dynamic> weapon) async {
-    Database db = await database;
-    await db.insert(
-      'weapons',
-      weapon,
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    if (kIsWeb) return;
+    final db = await database;
+    await db.insert('weapons', weapon,
+        conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<Map<String, dynamic>?> getWeaponById(String id) async {
-    Database db = await database;
+    if (kIsWeb) return null;
+    final db = await database;
     final List<Map<String, dynamic>> maps = await db.query(
       'weapons',
       where: 'id = ?',
@@ -456,7 +548,8 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> searchWeaponsLocal(String query) async {
-    Database db = await database;
+    if (kIsWeb) return [];
+    final db = await database;
     return await db.query(
       'weapons',
       where: 'name LIKE ? OR manufacturer LIKE ? OR model LIKE ?',
@@ -467,11 +560,9 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getAllWeapons() async {
-    Database db = await database;
-    return await db.query(
-      'weapons',
-      orderBy: 'usage_count DESC',
-    );
+    if (kIsWeb) return [];
+    final db = await database;
+    return await db.query('weapons', orderBy: 'usage_count DESC');
   }
 
   // SYNC QUEUE
@@ -482,7 +573,8 @@ class DatabaseHelper {
     String action,
     String? data,
   ) async {
-    Database db = await database;
+    if (kIsWeb) return;
+    final db = await database;
     await db.insert('sync_queue', {
       'entity_type': entityType,
       'entity_id': entityId,
@@ -494,20 +586,20 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getPendingSyncItems() async {
-    Database db = await database;
-    return await db.query(
-      'sync_queue',
-      orderBy: 'created_at ASC',
-    );
+    if (kIsWeb) return [];
+    final db = await database;
+    return await db.query('sync_queue', orderBy: 'created_at ASC');
   }
 
   Future<void> removeSyncQueueItem(int id) async {
-    Database db = await database;
+    if (kIsWeb) return;
+    final db = await database;
     await db.delete('sync_queue', where: 'id = ?', whereArgs: [id]);
   }
 
   Future<void> incrementSyncRetry(int id, String error) async {
-    Database db = await database;
+    if (kIsWeb) return;
+    final db = await database;
     await db.rawUpdate(
       'UPDATE sync_queue SET retry_count = retry_count + 1, last_error = ? WHERE id = ?',
       [error, id],
@@ -517,7 +609,8 @@ class DatabaseHelper {
   // SESSION SYNC
 
   Future<List<Session>> getPendingSessions() async {
-    Database db = await database;
+    if (kIsWeb) return [];
+    final db = await database;
     final List<Map<String, dynamic>> maps = await db.query(
       'sessions',
       where: 'sync_status = ?',
@@ -527,7 +620,8 @@ class DatabaseHelper {
   }
 
   Future<void> markSessionAsSynced(int sessionId, String firestoreId) async {
-    Database db = await database;
+    if (kIsWeb) return;
+    final db = await database;
     await db.update(
       'sessions',
       {
@@ -541,7 +635,8 @@ class DatabaseHelper {
   }
 
   Future<void> markSessionSyncError(int sessionId) async {
-    Database db = await database;
+    if (kIsWeb) return;
+    final db = await database;
     await db.update(
       'sessions',
       {'sync_status': 'error'},
@@ -551,7 +646,8 @@ class DatabaseHelper {
   }
 
   Future<List<Session>> getUnmigratedSessions() async {
-    Database db = await database;
+    if (kIsWeb) return [];
+    final db = await database;
     final List<Map<String, dynamic>> maps = await db.query(
       'sessions',
       where: 'is_migrated = ? AND user_id IS NULL',
@@ -563,7 +659,8 @@ class DatabaseHelper {
   // UTILITY
 
   Future<void> close() async {
-    Database db = await database;
+    if (kIsWeb) return;
+    final db = await database;
     db.close();
   }
 }

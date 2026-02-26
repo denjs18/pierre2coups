@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../models/impact.dart';
 import '../models/target.dart';
@@ -63,8 +64,10 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   }
 
   Future<void> _loadImageSize() async {
-    final image = Image.file(File(widget.imagePath));
-    final completer = image.image.resolve(const ImageConfiguration());
+    final ImageProvider provider = kIsWeb
+        ? (NetworkImage(widget.imagePath) as ImageProvider)
+        : FileImage(File(widget.imagePath));
+    final completer = provider.resolve(const ImageConfiguration());
     completer.addListener(ImageStreamListener((info, _) {
       setState(() {
         _imageSize = Size(
@@ -73,6 +76,13 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
         );
       });
     }));
+  }
+
+  Widget _buildTargetImage({BoxFit fit = BoxFit.cover}) {
+    if (kIsWeb) {
+      return Image.network(widget.imagePath, fit: fit);
+    }
+    return Image.file(File(widget.imagePath), fit: fit);
   }
 
   void _selectAutoMode() async {
@@ -293,10 +303,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: Image.file(
-                File(widget.imagePath),
-                fit: BoxFit.cover,
-              ),
+              child: _buildTargetImage(fit: BoxFit.cover),
             ),
           ),
           const SizedBox(height: 32),
