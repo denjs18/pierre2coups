@@ -1,9 +1,12 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../database/database_helper.dart';
 import '../models/session.dart';
+import '../services/firebase_auth_service.dart';
 import '../theme/app_theme.dart';
+import 'auth/welcome_screen.dart';
 import 'capture_screen.dart';
 import 'history_screen.dart';
 import 'results_screen.dart';
@@ -19,18 +22,20 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List<Session> _recentSessions = [];
+  List<Session> _allSessions = [];
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadRecentSessions();
+    _loadSessions();
   }
 
-  Future<void> _loadRecentSessions() async {
+  Future<void> _loadSessions() async {
     setState(() => _isLoading = true);
     final allSessions = await DatabaseHelper.instance.getAllSessions();
     setState(() {
+      _allSessions = allSessions;
       _recentSessions = allSessions.take(5).toList();
       _isLoading = false;
     });
@@ -41,9 +46,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
       MaterialPageRoute(builder: (context) => const CaptureScreen()),
     );
-    if (result == true) {
-      _loadRecentSessions();
-    }
+    if (result == true) _loadSessions();
   }
 
   void _navigateToHistory() async {
@@ -51,9 +54,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
       MaterialPageRoute(builder: (context) => const HistoryScreen()),
     );
-    if (result == true) {
-      _loadRecentSessions();
-    }
+    if (result == true) _loadSessions();
   }
 
   void _navigateToStatistics() {
@@ -70,11 +71,59 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<void> _handleLogout() async {
+    final authService = Provider.of<FirebaseAuthService>(context, listen: false);
+    try {
+      await authService.signOut();
+      if (!mounted) return;
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erreur déconnexion: $e')),
+      );
+    }
+  }
+
+  // Statistiques calculées
+  int get _totalSessions => _allSessions.length;
+
+  double? get _avgPrecision {
+    final withDev = _allSessions.where((s) => s.stdDeviation != null).toList();
+    if (withDev.isEmpty) return null;
+    return withDev.map((s) => s.stdDeviation!).reduce((a, b) => a + b) /
+        withDev.length;
+  }
+
+  double? get _bestSession {
+    final withDev = _allSessions.where((s) => s.stdDeviation != null).toList();
+    if (withDev.isEmpty) return null;
+    return withDev.map((s) => s.stdDeviation!).reduce((a, b) => a < b ? a : b);
+  }
+
+  int get _activeWeapons {
+    return _allSessions
+        .map((s) => s.displayWeaponName ?? '')
+        .where((w) => w.isNotEmpty)
+        .toSet()
+        .length;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final authService = Provider.of<FirebaseAuthService>(context, listen: false);
+    final currentUser = authService.currentUser;
+    final isGuest = currentUser == null;
+    final agentLabel = isGuest
+        ? 'INVITÉ'
+        : (currentUser.firstName?.isNotEmpty == true
+            ? currentUser.firstName!.toUpperCase()
+            : currentUser.email.split('@').first.toUpperCase());
+
     return Scaffold(
       backgroundColor: AppTheme.backgroundPrimary,
       appBar: AppBar(
+        backgroundColor: AppTheme.backgroundPrimary,
         title: Row(
           children: [
             Container(
@@ -85,55 +134,132 @@ class _HomeScreenState extends State<HomeScreen> {
                 shape: BoxShape.circle,
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 10),
             const Text(
               'PIERRE2COUPS',
               style: TextStyle(
-                fontSize: 20,
+                fontSize: 18,
                 fontWeight: FontWeight.w700,
-                letterSpacing: 1.2,
+                letterSpacing: 1.5,
+                color: AppTheme.textPrimary,
               ),
             ),
           ],
         ),
         actions: [
+          // Icône stats
           IconButton(
-            icon: const Icon(Icons.bar_chart),
+            icon: const Icon(Icons.bar_chart, color: AppTheme.textSecondary),
             onPressed: _navigateToStatistics,
             tooltip: 'Statistiques',
           ),
-          IconButton(
-            icon: const Icon(Icons.history),
-            onPressed: _navigateToHistory,
-            tooltip: 'Historique complet',
-          ),
+          // Avatar/déconnexion
+          if (!isGuest)
+            PopupMenuButton<String>(
+              icon: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceColor,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: AppTheme.borderColor),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.person_outline,
+                        color: AppTheme.accentPrimary, size: 16),
+                    const SizedBox(width: 4),
+                    Text(
+                      agentLabel,
+                      style: const TextStyle(
+                        color: AppTheme.accentPrimary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              color: AppTheme.surfaceColor,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(6),
+                side: const BorderSide(color: AppTheme.borderColor),
+              ),
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: 'logout',
+                  child: Row(
+                    children: const [
+                      Icon(Icons.logout, color: AppTheme.accentDanger, size: 18),
+                      SizedBox(width: 10),
+                      Text(
+                        'DÉCONNEXION',
+                        style: TextStyle(
+                          color: AppTheme.accentDanger,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              onSelected: (value) {
+                if (value == 'logout') _handleLogout();
+              },
+            )
+          else
+            // Bouton pour quitter le mode invité
+            TextButton(
+              onPressed: () {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(
+                      builder: (context) => const WelcomeScreen()),
+                );
+              },
+              child: const Text(
+                'CONNEXION',
+                style: TextStyle(
+                  color: AppTheme.accentPrimary,
+                  fontSize: 11,
+                  letterSpacing: 1,
+                ),
+              ),
+            ),
+          const SizedBox(width: 8),
         ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(height: 1, color: AppTheme.borderColor),
+        ),
       ),
       body: RefreshIndicator(
-        onRefresh: _loadRecentSessions,
+        onRefresh: _loadSessions,
         color: AppTheme.accentPrimary,
+        backgroundColor: AppTheme.surfaceColor,
         child: _isLoading
             ? const Center(
-                child: CircularProgressIndicator(
-                  color: AppTheme.accentPrimary,
-                ),
+                child: CircularProgressIndicator(color: AppTheme.accentPrimary),
               )
             : SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(24.0),
+                padding: const EdgeInsets.all(20.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Hero section avec le bouton principal
-                    _buildHeroSection(),
-                    const SizedBox(height: 32),
+                    // Briefing Mission
+                    _buildBriefingSection(agentLabel),
+                    const SizedBox(height: 20),
 
-                    // Stats rapides
-                    if (_recentSessions.isNotEmpty) _buildQuickStats(),
-                    if (_recentSessions.isNotEmpty) const SizedBox(height: 32),
+                    // 4 tuiles stats
+                    _buildStatsGrid(),
+                    const SizedBox(height: 20),
 
-                    // Sessions récentes
-                    _buildRecentSessionsSection(),
+                    // Dernières opérations
+                    _buildRecentOperations(),
                   ],
                 ),
               ),
@@ -141,84 +267,126 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildHeroSection() {
+  Widget _buildBriefingSection(String agentLabel) {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            AppTheme.accentPrimary.withOpacity(0.1),
+            AppTheme.accentPrimary.withOpacity(0.08),
             AppTheme.backgroundSecondary,
           ],
         ),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: AppTheme.accentPrimary.withOpacity(0.3),
+          color: AppTheme.accentPrimary.withOpacity(0.4),
           width: 1,
         ),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            Icons.gps_fixed,
-            size: 64,
-            color: AppTheme.accentPrimary,
+          // En-tête briefing
+          Row(
+            children: [
+              const Icon(Icons.gps_fixed, color: AppTheme.accentPrimary, size: 16),
+              const SizedBox(width: 8),
+              const Text(
+                'BRIEFING MISSION',
+                style: TextStyle(
+                  color: AppTheme.accentPrimary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 2,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: AppTheme.missionBadge(AppTheme.accentPrimary),
+                child: const Text(
+                  '◉ PRÊT POUR MISSION',
+                  style: TextStyle(
+                    color: AppTheme.accentPrimary,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1,
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
-          Text(
-            'ANALYSE TACTIQUE',
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  letterSpacing: 2,
-                  fontWeight: FontWeight.w700,
+
+          // Ligne de statut agent
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppTheme.backgroundPrimary.withOpacity(0.5),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: AppTheme.borderColor),
+            ),
+            child: Row(
+              children: [
+                _buildStatusChip('AGENT', agentLabel),
+                _buildStatusDivider(),
+                _buildStatusChip('SESSIONS', '$_totalSessions'),
+                _buildStatusDivider(),
+                _buildStatusChip(
+                  'PRÉCISION',
+                  _avgPrecision != null
+                      ? '${_avgPrecision!.toStringAsFixed(1)} cm'
+                      : 'N/A',
                 ),
-            textAlign: TextAlign.center,
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Détection automatique · Statistiques · Historique',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  letterSpacing: 0.5,
-                ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
+
+          // Bouton Nouvelle Mission
           ElevatedButton.icon(
             onPressed: _navigateToCapture,
-            icon: const Icon(Icons.add_a_photo, size: 24),
+            icon: const Icon(Icons.add_circle_outline, size: 20),
             label: const Text(
-              'NOUVELLE SESSION',
+              '⊕ NOUVELLE MISSION',
               style: TextStyle(
-                fontSize: 16,
+                fontSize: 14,
                 fontWeight: FontWeight.w700,
-                letterSpacing: 1,
+                letterSpacing: 1.5,
               ),
             ),
             style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+              backgroundColor: AppTheme.accentPrimary,
+              foregroundColor: AppTheme.backgroundPrimary,
+              minimumSize: const Size(double.infinity, 52),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(6),
               ),
+              elevation: 0,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 10),
+
+          // Bouton Arsenal
           OutlinedButton.icon(
             onPressed: _navigateToMyWeapons,
-            icon: const Icon(Icons.settings_applications, size: 20),
+            icon: const Icon(Icons.settings_applications_outlined, size: 18),
             label: const Text(
-              'MES ARMES',
+              '◈ ARSENAL',
               style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 1,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.5,
               ),
             ),
             style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              side: BorderSide(color: AppTheme.accentPrimary.withOpacity(0.5)),
+              foregroundColor: AppTheme.accentPrimary,
+              minimumSize: const Size(double.infinity, 44),
+              side: const BorderSide(color: AppTheme.accentPrimary, width: 1),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(6),
               ),
             ),
           ),
@@ -227,101 +395,189 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildQuickStats() {
-    final totalSessions = _recentSessions.length;
-    final avgStdDev = _recentSessions
-            .where((s) => s.stdDeviation != null)
-            .map((s) => s.stdDeviation!)
-            .fold(0.0, (a, b) => a + b) /
-        _recentSessions.where((s) => s.stdDeviation != null).length;
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.surfaceColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.borderColor),
-      ),
-      child: Row(
+  Widget _buildStatusChip(String label, String value) {
+    return Expanded(
+      child: Column(
         children: [
-          Expanded(
-            child: _buildStatItem(
-              label: 'SESSIONS',
-              value: totalSessions.toString(),
-              icon: Icons.analytics,
+          Text(
+            label,
+            style: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 9,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1,
             ),
           ),
-          Container(
-            width: 1,
-            height: 40,
-            color: AppTheme.borderColor,
-          ),
-          Expanded(
-            child: _buildStatItem(
-              label: 'PRÉCISION MOY',
-              value: avgStdDev.isNaN ? '-' : '${avgStdDev.toStringAsFixed(1)} cm',
-              icon: Icons.track_changes,
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: const TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
             ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildStatItem({
-    required String label,
-    required String value,
-    required IconData icon,
-  }) {
-    return Column(
+  Widget _buildStatusDivider() {
+    return Container(
+      width: 1,
+      height: 28,
+      color: AppTheme.borderColor,
+      margin: const EdgeInsets.symmetric(horizontal: 8),
+    );
+  }
+
+  Widget _buildStatsGrid() {
+    return GridView.count(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      crossAxisCount: 2,
+      childAspectRatio: 1.6,
+      mainAxisSpacing: 10,
+      crossAxisSpacing: 10,
       children: [
-        Icon(icon, color: AppTheme.accentPrimary, size: 20),
-        const SizedBox(height: 8),
-        Text(
-          value,
-          style: AppTheme.statNumberStyle.copyWith(fontSize: 18),
+        _buildStatTile(
+          label: 'SESSIONS TOTALES',
+          value: '$_totalSessions',
+          icon: Icons.analytics_outlined,
+          color: AppTheme.accentPrimary,
         ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: AppTheme.labelStyle,
-          textAlign: TextAlign.center,
+        _buildStatTile(
+          label: 'PRÉCISION MOY',
+          value: _avgPrecision != null
+              ? '${_avgPrecision!.toStringAsFixed(1)} cm'
+              : '—',
+          icon: Icons.track_changes_outlined,
+          color: AppTheme.accentSecondary,
+        ),
+        _buildStatTile(
+          label: 'MEILLEURE SESSION',
+          value: _bestSession != null
+              ? '${_bestSession!.toStringAsFixed(1)} cm'
+              : '—',
+          icon: Icons.military_tech_outlined,
+          color: AppTheme.accentPrimary,
+        ),
+        _buildStatTile(
+          label: 'ARMES ACTIVES',
+          value: '$_activeWeapons',
+          icon: Icons.settings_applications_outlined,
+          color: AppTheme.accentSecondary,
         ),
       ],
     );
   }
 
-  Widget _buildRecentSessionsSection() {
+  Widget _buildStatTile({
+    required String label,
+    required String value,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Icon(icon, color: color, size: 18),
+              Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.6),
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ],
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                value,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRecentOperations() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              'SESSIONS RÉCENTES',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    letterSpacing: 1,
-                    fontWeight: FontWeight.w700,
-                  ),
+            const Text(
+              'DERNIÈRES OPÉRATIONS',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.5,
+              ),
             ),
             if (_recentSessions.isNotEmpty)
-              TextButton.icon(
+              TextButton(
                 onPressed: _navigateToHistory,
-                icon: const Icon(Icons.arrow_forward, size: 16),
-                label: const Text('TOUT VOIR'),
                 style: TextButton.styleFrom(
                   foregroundColor: AppTheme.accentPrimary,
+                  padding: EdgeInsets.zero,
+                ),
+                child: const Text(
+                  'TOUT VOIR ›',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1,
+                  ),
                 ),
               ),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 2),
+        Container(height: 1, color: AppTheme.borderColor),
+        const SizedBox(height: 12),
+
         _recentSessions.isEmpty
             ? _buildEmptyState()
             : Column(
                 children: _recentSessions
-                    .map((session) => _buildSessionCard(session))
+                    .map((session) => _buildOperationCard(session))
                     .toList(),
               ),
       ],
@@ -330,34 +586,36 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildEmptyState() {
     return Container(
-      padding: const EdgeInsets.all(48),
+      padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
       decoration: BoxDecoration(
         color: AppTheme.surfaceColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: AppTheme.borderColor,
-          width: 2,
-          style: BorderStyle.solid,
-        ),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.borderColor),
       ),
       child: Column(
         children: [
           Icon(
-            Icons.folder_open,
-            size: 64,
-            color: AppTheme.textSecondary.withOpacity(0.5),
+            Icons.folder_open_outlined,
+            size: 48,
+            color: AppTheme.textSecondary.withOpacity(0.4),
           ),
-          const SizedBox(height: 16),
-          Text(
-            'Aucune session',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: AppTheme.textSecondary,
-                ),
+          const SizedBox(height: 12),
+          const Text(
+            'AUCUNE OPÉRATION',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.5,
+            ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Commencez par créer une nouvelle session',
-            style: Theme.of(context).textTheme.bodySmall,
+          const SizedBox(height: 6),
+          const Text(
+            'Commencez par créer une nouvelle mission',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+            ),
             textAlign: TextAlign.center,
           ),
         ],
@@ -365,31 +623,29 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildSessionThumbnail(String imagePath) {
-    if (kIsWeb) {
-      return Container(
-        color: AppTheme.backgroundPrimary,
-        child: const Icon(Icons.image, color: AppTheme.textSecondary),
-      );
+  Widget _buildOperationCard(Session session) {
+    // Indicateur de précision selon stdDeviation
+    Color precisionColor;
+    String precisionLabel;
+    if (session.stdDeviation == null) {
+      precisionColor = AppTheme.textSecondary;
+      precisionLabel = 'N/A';
+    } else if (session.stdDeviation! <= 5) {
+      precisionColor = AppTheme.accentPrimary;
+      precisionLabel = 'EXCELLENT';
+    } else if (session.stdDeviation! <= 10) {
+      precisionColor = AppTheme.accentSecondary;
+      precisionLabel = 'BON';
+    } else {
+      precisionColor = AppTheme.accentDanger;
+      precisionLabel = 'À AMÉLIORER';
     }
-    final file = File(imagePath);
-    return file.existsSync()
-        ? Image.file(file, fit: BoxFit.cover)
-        : Container(
-            color: AppTheme.backgroundPrimary,
-            child: const Icon(
-              Icons.image_not_supported,
-              color: AppTheme.textSecondary,
-            ),
-          );
-  }
 
-  Widget _buildSessionCard(Session session) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: AppTheme.surfaceColor,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: AppTheme.borderColor),
       ),
       child: Material(
@@ -405,110 +661,73 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             );
-            if (result == true) {
-              _loadRecentSessions();
-            }
+            if (result == true) _loadSessions();
           },
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(8),
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(14),
             child: Row(
               children: [
-                // Image miniature
+                // Miniature
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(4),
                   child: SizedBox(
-                    width: 80,
-                    height: 80,
+                    width: 64,
+                    height: 64,
                     child: _buildSessionThumbnail(session.imagePath),
                   ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 14),
 
                 // Infos
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // Arme + badge précision
                       Row(
                         children: [
                           Expanded(
                             child: Text(
-                              session.weapon ?? 'Arme non spécifiée',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleMedium
-                                  ?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                              session.displayWeaponName ?? 'Arme non spécifiée',
+                              style: const TextStyle(
+                                color: AppTheme.textPrimary,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          if (session.stdDeviation != null)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: AppTheme.statsBadge(),
-                              child: Text(
-                                '${session.stdDeviation!.toStringAsFixed(1)} cm',
-                                style: const TextStyle(
-                                  color: AppTheme.accentPrimary,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: AppTheme.missionBadge(precisionColor),
+                            child: Text(
+                              precisionLabel,
+                              style: TextStyle(
+                                color: precisionColor,
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.5,
                               ),
                             ),
+                          ),
                         ],
                       ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.calendar_today,
-                            size: 14,
-                            color: AppTheme.textSecondary,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            session.date,
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          const SizedBox(width: 16),
-                          Icon(
-                            Icons.gps_fixed,
-                            size: 14,
-                            color: AppTheme.textSecondary,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            '${session.shotCount} tirs',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          if (session.distance != null) ...[
-                            const SizedBox(width: 16),
-                            Icon(
-                              Icons.straighten,
-                              size: 14,
-                              color: AppTheme.textSecondary,
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              '${session.distance!.toStringAsFixed(0)}m',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ],
-                        ],
-                      ),
+                      const SizedBox(height: 6),
+
+                      // Rapport militaire: date / distance / tirs / score
+                      _buildReportLine(session, precisionColor),
                     ],
                   ),
                 ),
                 const SizedBox(width: 8),
                 const Icon(
                   Icons.chevron_right,
-                  color: AppTheme.textSecondary,
+                  color: AppTheme.borderColor,
+                  size: 18,
                 ),
               ],
             ),
@@ -516,5 +735,60 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildReportLine(Session session, Color precisionColor) {
+    return Wrap(
+      spacing: 12,
+      runSpacing: 4,
+      children: [
+        _buildReportChip(Icons.calendar_today_outlined, session.date, AppTheme.textSecondary),
+        _buildReportChip(Icons.gps_fixed, '${session.shotCount} tirs', AppTheme.textSecondary),
+        if (session.distance != null)
+          _buildReportChip(Icons.straighten_outlined,
+              '${session.distance!.toStringAsFixed(0)}m', AppTheme.textSecondary),
+        if (session.stdDeviation != null)
+          _buildReportChip(Icons.track_changes_outlined,
+              '${session.stdDeviation!.toStringAsFixed(1)} cm', precisionColor),
+      ],
+    );
+  }
+
+  Widget _buildReportChip(IconData icon, String text, Color color) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 11, color: color),
+        const SizedBox(width: 3),
+        Text(
+          text,
+          style: TextStyle(
+            color: color,
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSessionThumbnail(String imagePath) {
+    if (kIsWeb) {
+      return Container(
+        color: AppTheme.backgroundPrimary,
+        child: const Icon(Icons.image_outlined, color: AppTheme.textSecondary, size: 20),
+      );
+    }
+    final file = File(imagePath);
+    return file.existsSync()
+        ? Image.file(file, fit: BoxFit.cover)
+        : Container(
+            color: AppTheme.backgroundPrimary,
+            child: const Icon(
+              Icons.image_not_supported_outlined,
+              color: AppTheme.textSecondary,
+              size: 20,
+            ),
+          );
   }
 }

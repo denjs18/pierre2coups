@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/firebase_auth_service.dart';
-import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
 import '../home_screen.dart';
 import 'signup_screen.dart';
@@ -45,10 +44,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (!mounted) return;
 
-      // Navigation vers l'écran principal
-      Navigator.pushReplacement(
+      Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (context) => const HomeScreen()),
+        (route) => false,
       );
     } catch (e) {
       setState(() {
@@ -63,10 +62,23 @@ class _LoginScreenState extends State<LoginScreen> {
     return Scaffold(
       backgroundColor: AppTheme.backgroundPrimary,
       appBar: AppBar(
-        title: const Text('CONNEXION'),
+        backgroundColor: AppTheme.backgroundPrimary,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
+          icon: const Icon(Icons.arrow_back, color: AppTheme.textSecondary),
           onPressed: () => Navigator.pop(context),
+        ),
+        title: const Text(
+          'IDENTIFICATION AGENT',
+          style: TextStyle(
+            color: AppTheme.accentPrimary,
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 2,
+          ),
+        ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(height: 1, color: AppTheme.borderColor),
         ),
       ),
       body: SafeArea(
@@ -79,55 +91,73 @@ class _LoginScreenState extends State<LoginScreen> {
               children: [
                 const SizedBox(height: 32),
 
-                // Icône
-                Icon(
-                  Icons.lock_outline,
-                  size: 80,
-                  color: AppTheme.accentPrimary,
+                // Header militaire
+                Center(
+                  child: Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: AppTheme.accentPrimary, width: 2),
+                      borderRadius: BorderRadius.circular(8),
+                      color: AppTheme.accentPrimary.withOpacity(0.08),
+                    ),
+                    child: const Icon(
+                      Icons.shield_outlined,
+                      size: 48,
+                      color: AppTheme.accentPrimary,
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
 
-                // Titre
-                Text(
-                  'Bon retour !',
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                  textAlign: TextAlign.center,
+                const Center(
+                  child: Text(
+                    'IDENTIFICATION REQUISE',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 2,
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  'Connectez-vous pour accéder à vos sessions',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppTheme.textSecondary,
-                      ),
-                  textAlign: TextAlign.center,
+                const SizedBox(height: 6),
+                const Center(
+                  child: Text(
+                    'ENTREZ VOS CREDENTIALS D\'ACCÈS',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                      letterSpacing: 1.5,
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 48),
+                const SizedBox(height: 40),
 
                 // Message d'erreur
                 if (_errorMessage != null)
                   Container(
-                    padding: const EdgeInsets.all(16),
-                    margin: const EdgeInsets.only(bottom: 24),
+                    padding: const EdgeInsets.all(14),
+                    margin: const EdgeInsets.only(bottom: 20),
                     decoration: BoxDecoration(
-                      color: AppTheme.warningColor.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: AppTheme.warningColor,
-                      ),
+                      color: AppTheme.accentDanger.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: AppTheme.accentDanger, width: 1),
                     ),
                     child: Row(
                       children: [
-                        Icon(
-                          Icons.error_outline,
-                          color: AppTheme.warningColor,
+                        const Icon(
+                          Icons.warning_amber_outlined,
+                          color: AppTheme.accentDanger,
+                          size: 18,
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             _errorMessage!,
-                            style: TextStyle(color: AppTheme.warningColor),
+                            style: const TextStyle(
+                              color: AppTheme.accentDanger,
+                              fontSize: 13,
+                            ),
                           ),
                         ),
                       ],
@@ -138,13 +168,27 @@ class _LoginScreenState extends State<LoginScreen> {
                 TextFormField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
+                  style: const TextStyle(color: AppTheme.textPrimary),
                   decoration: const InputDecoration(
-                    labelText: 'Email',
-                    prefixIcon: Icon(Icons.email_outlined),
+                    labelText: '≡ EMAIL',
+                    labelStyle: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                      letterSpacing: 1,
+                    ),
+                    hintText: 'agent@operation.fr',
+                    hintStyle: TextStyle(color: AppTheme.borderColor, fontSize: 13),
+                    prefixIcon: Icon(
+                      Icons.alternate_email,
+                      color: AppTheme.textSecondary,
+                      size: 18,
+                    ),
+                    filled: true,
+                    fillColor: AppTheme.surfaceColor,
                   ),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
-                      return 'Veuillez entrer votre email';
+                      return 'Email requis';
                     }
                     if (!value.contains('@')) {
                       return 'Email invalide';
@@ -158,72 +202,102 @@ class _LoginScreenState extends State<LoginScreen> {
                 TextFormField(
                   controller: _passwordController,
                   obscureText: _obscurePassword,
+                  style: const TextStyle(color: AppTheme.textPrimary),
                   decoration: InputDecoration(
-                    labelText: 'Mot de passe',
-                    prefixIcon: const Icon(Icons.lock_outlined),
+                    labelText: '⊙ ACCÈS',
+                    labelStyle: const TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                      letterSpacing: 1,
+                    ),
+                    prefixIcon: const Icon(
+                      Icons.lock_outline,
+                      color: AppTheme.textSecondary,
+                      size: 18,
+                    ),
                     suffixIcon: IconButton(
                       icon: Icon(
-                        _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                        _obscurePassword
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                        color: AppTheme.textSecondary,
+                        size: 18,
                       ),
                       onPressed: () {
-                        setState(() {
-                          _obscurePassword = !_obscurePassword;
-                        });
+                        setState(() => _obscurePassword = !_obscurePassword);
                       },
                     ),
+                    filled: true,
+                    fillColor: AppTheme.surfaceColor,
                   ),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
-                      return 'Veuillez entrer votre mot de passe';
+                      return 'Mot de passe requis';
                     }
                     return null;
                   },
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
 
                 // Mot de passe oublié
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton(
                     onPressed: _isLoading ? null : _showForgotPasswordDialog,
-                    child: const Text('Mot de passe oublié ?'),
+                    child: const Text(
+                      'MOT DE PASSE COMPROMIS ?',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 11,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
 
-                // Bouton de connexion
+                // Bouton authentification
                 ElevatedButton(
                   onPressed: _isLoading ? null : _handleLogin,
                   style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.accentPrimary,
+                    foregroundColor: AppTheme.backgroundPrimary,
                     minimumSize: const Size(double.infinity, 56),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    elevation: 0,
                   ),
                   child: _isLoading
                       ? const SizedBox(
-                          height: 24,
-                          width: 24,
+                          height: 22,
+                          width: 22,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: Colors.white,
+                            color: AppTheme.backgroundPrimary,
                           ),
                         )
                       : const Text(
-                          'SE CONNECTER',
+                          '◉ AUTHENTIFIER',
                           style: TextStyle(
-                            fontSize: 16,
+                            fontSize: 15,
                             fontWeight: FontWeight.w700,
-                            letterSpacing: 1,
+                            letterSpacing: 1.5,
                           ),
                         ),
                 ),
                 const SizedBox(height: 24),
 
-                // Lien vers inscription
+                // Lien inscription
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(
-                      'Pas encore de compte ?',
-                      style: TextStyle(color: AppTheme.textSecondary),
+                    const Text(
+                      'Pas encore d\'agent ?',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 13,
+                      ),
                     ),
                     TextButton(
                       onPressed: _isLoading
@@ -237,8 +311,13 @@ class _LoginScreenState extends State<LoginScreen> {
                               );
                             },
                       child: const Text(
-                        'S\'inscrire',
-                        style: TextStyle(fontWeight: FontWeight.w700),
+                        'S\'ENREGISTRER',
+                        style: TextStyle(
+                          color: AppTheme.accentPrimary,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                          letterSpacing: 0.5,
+                        ),
                       ),
                     ),
                   ],
@@ -252,26 +331,43 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _showForgotPasswordDialog() {
-    final emailController = TextEditingController();
+    final emailController = TextEditingController(
+      text: _emailController.text,
+    );
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.surfaceColor,
-        title: const Text('Réinitialiser le mot de passe'),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: const BorderSide(color: AppTheme.borderColor),
+        ),
+        title: const Text(
+          'RÉINITIALISATION',
+          style: TextStyle(
+            color: AppTheme.accentPrimary,
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 2,
+          ),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Entrez votre email pour recevoir un lien de réinitialisation.',
+              'Un lien de réinitialisation sera envoyé à votre email.',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: emailController,
               keyboardType: TextInputType.emailAddress,
+              style: const TextStyle(color: AppTheme.textPrimary),
               decoration: const InputDecoration(
-                labelText: 'Email',
-                prefixIcon: Icon(Icons.email_outlined),
+                labelText: '≡ EMAIL',
+                prefixIcon: Icon(Icons.alternate_email, size: 18),
               ),
             ),
           ],
@@ -279,7 +375,10 @@ class _LoginScreenState extends State<LoginScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Annuler'),
+            child: const Text(
+              'ANNULER',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
           ),
           ElevatedButton(
             onPressed: () async {
@@ -296,8 +395,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('Email de réinitialisation envoyé à $email'),
-                    backgroundColor: AppTheme.successColor,
+                    content: Text('Lien envoyé à $email'),
+                    backgroundColor: AppTheme.surfaceColor,
                   ),
                 );
               } catch (e) {
@@ -305,12 +404,16 @@ class _LoginScreenState extends State<LoginScreen> {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(e.toString().replaceAll('Exception: ', '')),
-                    backgroundColor: AppTheme.warningColor,
+                    backgroundColor: AppTheme.accentDanger.withOpacity(0.8),
                   ),
                 );
               }
             },
-            child: const Text('Envoyer'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.accentPrimary,
+              foregroundColor: AppTheme.backgroundPrimary,
+            ),
+            child: const Text('ENVOYER'),
           ),
         ],
       ),
