@@ -7,6 +7,11 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../models/session.dart';
 import '../models/impact.dart';
 import '../models/target.dart';
+import '../models/component.dart';
+import '../models/recipe.dart';
+import '../models/recipe_ingredient.dart';
+import '../models/batch.dart';
+import '../models/stock_transaction.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
@@ -38,7 +43,7 @@ class DatabaseHelper {
     final dbPath = join(documentsDirectory.path, 'pierre2coups.db');
     return await openDatabase(
       dbPath,
-      version: 2,
+      version: 3,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -69,7 +74,8 @@ class DatabaseHelper {
         c200_details TEXT,
         updated_at TEXT,
         sync_status TEXT DEFAULT 'pending',
-        is_migrated INTEGER DEFAULT 0
+        is_migrated INTEGER DEFAULT 0,
+        batch_id INTEGER
       )
     ''');
 
@@ -164,12 +170,102 @@ class DatabaseHelper {
       )
     ''');
 
+    // Tables pour le système de gestion de rechargement
+    await db.execute('''
+      CREATE TABLE components (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        brand TEXT,
+        reference TEXT,
+        category TEXT NOT NULL,
+        quantity REAL NOT NULL DEFAULT 0,
+        initial_quantity REAL,
+        reload_count INTEGER DEFAULT 0,
+        alert_threshold REAL,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE recipes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        weapon_id TEXT,
+        weapon_name TEXT,
+        caliber TEXT,
+        description TEXT,
+        powder_weight REAL,
+        overall_length REAL,
+        bullet_weight REAL,
+        is_default INTEGER DEFAULT 0,
+        usage_count INTEGER DEFAULT 0,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE recipe_ingredients (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        recipe_id INTEGER NOT NULL,
+        component_id INTEGER NOT NULL,
+        quantity_per_unit REAL NOT NULL,
+        FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE,
+        FOREIGN KEY (component_id) REFERENCES components(id) ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE batches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        lot_number TEXT NOT NULL UNIQUE,
+        recipe_id INTEGER NOT NULL,
+        recipe_name TEXT,
+        weapon_id TEXT,
+        weapon_name TEXT,
+        quantity_initial INTEGER NOT NULL,
+        quantity_remaining INTEGER NOT NULL,
+        status TEXT DEFAULT 'active',
+        fabrication_date TEXT NOT NULL,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE RESTRICT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE stock_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        component_id INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        quantity REAL NOT NULL,
+        balance_after REAL NOT NULL,
+        batch_id INTEGER,
+        session_id INTEGER,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (component_id) REFERENCES components(id) ON DELETE CASCADE,
+        FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE SET NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL
+      )
+    ''');
+
     await db.execute('CREATE INDEX idx_sessions_user ON sessions(user_id)');
-    await db.execute(
-        'CREATE INDEX idx_sessions_firestore ON sessions(firestore_id)');
+    await db.execute('CREATE INDEX idx_sessions_firestore ON sessions(firestore_id)');
     await db.execute('CREATE INDEX idx_sessions_sync ON sessions(sync_status)');
+    await db.execute('CREATE INDEX idx_sessions_batch ON sessions(batch_id)');
     await db.execute('CREATE INDEX idx_weapons_name ON weapons(name)');
     await db.execute('CREATE INDEX idx_clubs_name ON clubs(name, city)');
+    await db.execute('CREATE INDEX idx_components_category ON components(category)');
+    await db.execute('CREATE INDEX idx_recipes_weapon ON recipes(weapon_id)');
+    await db.execute('CREATE INDEX idx_batches_recipe ON batches(recipe_id)');
+    await db.execute('CREATE INDEX idx_batches_status ON batches(status)');
+    await db.execute('CREATE INDEX idx_stock_transactions_component ON stock_transactions(component_id)');
+    await db.execute('CREATE INDEX idx_stock_transactions_batch ON stock_transactions(batch_id)');
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -194,14 +290,12 @@ class DatabaseHelper {
       await db.execute(
           'ALTER TABLE impacts ADD COLUMN distance_from_center REAL');
 
-      await db
-          .execute('ALTER TABLE calibration ADD COLUMN c200_center_x REAL');
-      await db
-          .execute('ALTER TABLE calibration ADD COLUMN c200_center_y REAL');
+      await db.execute('ALTER TABLE calibration ADD COLUMN c200_center_x REAL');
+      await db.execute('ALTER TABLE calibration ADD COLUMN c200_center_y REAL');
       await db.execute('ALTER TABLE calibration ADD COLUMN c200_scale REAL');
 
       await db.execute('''
-        CREATE TABLE users (
+        CREATE TABLE IF NOT EXISTS users (
           id TEXT PRIMARY KEY,
           email TEXT NOT NULL,
           first_name TEXT,
@@ -215,7 +309,7 @@ class DatabaseHelper {
       ''');
 
       await db.execute('''
-        CREATE TABLE clubs (
+        CREATE TABLE IF NOT EXISTS clubs (
           id TEXT PRIMARY KEY,
           name TEXT NOT NULL,
           city TEXT NOT NULL,
@@ -227,7 +321,7 @@ class DatabaseHelper {
       ''');
 
       await db.execute('''
-        CREATE TABLE weapons (
+        CREATE TABLE IF NOT EXISTS weapons (
           id TEXT PRIMARY KEY,
           name TEXT NOT NULL,
           manufacturer TEXT NOT NULL,
@@ -241,7 +335,7 @@ class DatabaseHelper {
       ''');
 
       await db.execute('''
-        CREATE TABLE departments (
+        CREATE TABLE IF NOT EXISTS departments (
           code TEXT PRIMARY KEY,
           name TEXT NOT NULL,
           region TEXT NOT NULL
@@ -249,7 +343,7 @@ class DatabaseHelper {
       ''');
 
       await db.execute('''
-        CREATE TABLE sync_queue (
+        CREATE TABLE IF NOT EXISTS sync_queue (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           entity_type TEXT NOT NULL,
           entity_id TEXT NOT NULL,
@@ -261,13 +355,106 @@ class DatabaseHelper {
         )
       ''');
 
-      await db.execute('CREATE INDEX idx_sessions_user ON sessions(user_id)');
-      await db.execute(
-          'CREATE INDEX idx_sessions_firestore ON sessions(firestore_id)');
-      await db
-          .execute('CREATE INDEX idx_sessions_sync ON sessions(sync_status)');
-      await db.execute('CREATE INDEX idx_weapons_name ON weapons(name)');
-      await db.execute('CREATE INDEX idx_clubs_name ON clubs(name, city)');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_sessions_firestore ON sessions(firestore_id)');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_sessions_sync ON sessions(sync_status)');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_weapons_name ON weapons(name)');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_clubs_name ON clubs(name, city)');
+    }
+
+    if (oldVersion < 3) {
+      await db.execute('ALTER TABLE sessions ADD COLUMN batch_id INTEGER');
+
+      await db.execute('''
+        CREATE TABLE components (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          brand TEXT,
+          reference TEXT,
+          category TEXT NOT NULL,
+          quantity REAL NOT NULL DEFAULT 0,
+          initial_quantity REAL,
+          reload_count INTEGER DEFAULT 0,
+          alert_threshold REAL,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE recipes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          weapon_id TEXT,
+          weapon_name TEXT,
+          caliber TEXT,
+          description TEXT,
+          powder_weight REAL,
+          overall_length REAL,
+          bullet_weight REAL,
+          is_default INTEGER DEFAULT 0,
+          usage_count INTEGER DEFAULT 0,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE recipe_ingredients (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          recipe_id INTEGER NOT NULL,
+          component_id INTEGER NOT NULL,
+          quantity_per_unit REAL NOT NULL,
+          FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE,
+          FOREIGN KEY (component_id) REFERENCES components(id) ON DELETE CASCADE
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE batches (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          lot_number TEXT NOT NULL UNIQUE,
+          recipe_id INTEGER NOT NULL,
+          recipe_name TEXT,
+          weapon_id TEXT,
+          weapon_name TEXT,
+          quantity_initial INTEGER NOT NULL,
+          quantity_remaining INTEGER NOT NULL,
+          status TEXT DEFAULT 'active',
+          fabrication_date TEXT NOT NULL,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT,
+          FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE RESTRICT
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE stock_transactions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          component_id INTEGER NOT NULL,
+          type TEXT NOT NULL,
+          quantity REAL NOT NULL,
+          balance_after REAL NOT NULL,
+          batch_id INTEGER,
+          session_id INTEGER,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (component_id) REFERENCES components(id) ON DELETE CASCADE,
+          FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE SET NULL,
+          FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL
+        )
+      ''');
+
+      await db.execute('CREATE INDEX idx_sessions_batch ON sessions(batch_id)');
+      await db.execute('CREATE INDEX idx_components_category ON components(category)');
+      await db.execute('CREATE INDEX idx_recipes_weapon ON recipes(weapon_id)');
+      await db.execute('CREATE INDEX idx_batches_recipe ON batches(recipe_id)');
+      await db.execute('CREATE INDEX idx_batches_status ON batches(status)');
+      await db.execute('CREATE INDEX idx_stock_transactions_component ON stock_transactions(component_id)');
+      await db.execute('CREATE INDEX idx_stock_transactions_batch ON stock_transactions(batch_id)');
     }
   }
 
@@ -301,8 +488,7 @@ class DatabaseHelper {
 
   Future<Session?> getSession(int id) async {
     if (kIsWeb) {
-      final maps =
-          _webSessions.where((m) => m['id'] == id).toList();
+      final maps = _webSessions.where((m) => m['id'] == id).toList();
       return maps.isEmpty ? null : Session.fromMap(maps.first);
     }
     final db = await database;
@@ -317,8 +503,7 @@ class DatabaseHelper {
 
   Future<int> updateSession(Session session) async {
     if (kIsWeb) {
-      final idx =
-          _webSessions.indexWhere((m) => m['id'] == session.id);
+      final idx = _webSessions.indexWhere((m) => m['id'] == session.id);
       if (idx >= 0) {
         _webSessions[idx] = Map<String, dynamic>.from(session.toMap())
           ..['id'] = session.id;
@@ -654,6 +839,413 @@ class DatabaseHelper {
       whereArgs: [0],
     );
     return List.generate(maps.length, (i) => Session.fromMap(maps[i]));
+  }
+
+  // ============================================
+  // COMPONENTS (Stock Central)
+  // ============================================
+
+  Future<int> insertComponent(Component component) async {
+    if (kIsWeb) return 0;
+    final db = await database;
+    return await db.insert('components', component.toMap());
+  }
+
+  Future<List<Component>> getAllComponents() async {
+    if (kIsWeb) return [];
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'components',
+      orderBy: 'category, name',
+    );
+    return List.generate(maps.length, (i) => Component.fromMap(maps[i]));
+  }
+
+  Future<List<Component>> getComponentsByCategory(ComponentCategory category) async {
+    if (kIsWeb) return [];
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'components',
+      where: 'category = ?',
+      whereArgs: [category.name],
+      orderBy: 'name',
+    );
+    return List.generate(maps.length, (i) => Component.fromMap(maps[i]));
+  }
+
+  Future<Component?> getComponent(int id) async {
+    if (kIsWeb) return null;
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'components',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    if (maps.isEmpty) return null;
+    return Component.fromMap(maps.first);
+  }
+
+  Future<int> updateComponent(Component component) async {
+    if (kIsWeb) return 0;
+    final db = await database;
+    return await db.update(
+      'components',
+      component.copyWith(updatedAt: DateTime.now()).toMap(),
+      where: 'id = ?',
+      whereArgs: [component.id],
+    );
+  }
+
+  Future<int> updateComponentQuantity(int componentId, double newQuantity) async {
+    if (kIsWeb) return 0;
+    final db = await database;
+    return await db.update(
+      'components',
+      {
+        'quantity': newQuantity,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [componentId],
+    );
+  }
+
+  Future<int> deleteComponent(int id) async {
+    if (kIsWeb) return 0;
+    final db = await database;
+    return await db.delete('components', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<List<Component>> getLowStockComponents() async {
+    if (kIsWeb) return [];
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.rawQuery('''
+      SELECT * FROM components
+      WHERE alert_threshold IS NOT NULL
+        AND initial_quantity IS NOT NULL
+        AND initial_quantity > 0
+        AND (quantity / initial_quantity * 100) <= alert_threshold
+      ORDER BY category, name
+    ''');
+    return List.generate(maps.length, (i) => Component.fromMap(maps[i]));
+  }
+
+  // ============================================
+  // RECIPES (Feuilles de Rechargement)
+  // ============================================
+
+  Future<int> insertRecipe(Recipe recipe) async {
+    if (kIsWeb) return 0;
+    final db = await database;
+    return await db.insert('recipes', recipe.toMap());
+  }
+
+  Future<List<Recipe>> getAllRecipes() async {
+    if (kIsWeb) return [];
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'recipes',
+      orderBy: 'usage_count DESC, name',
+    );
+
+    List<Recipe> recipes = [];
+    for (final map in maps) {
+      final ingredients = await getRecipeIngredients(map['id'] as int);
+      recipes.add(Recipe.fromMap(map, ingredients: ingredients));
+    }
+    return recipes;
+  }
+
+  Future<List<Recipe>> getRecipesForWeapon(String weaponId) async {
+    if (kIsWeb) return [];
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'recipes',
+      where: 'weapon_id = ?',
+      whereArgs: [weaponId],
+      orderBy: 'usage_count DESC, name',
+    );
+
+    List<Recipe> recipes = [];
+    for (final map in maps) {
+      final ingredients = await getRecipeIngredients(map['id'] as int);
+      recipes.add(Recipe.fromMap(map, ingredients: ingredients));
+    }
+    return recipes;
+  }
+
+  Future<Recipe?> getRecipe(int id) async {
+    if (kIsWeb) return null;
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'recipes',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    if (maps.isEmpty) return null;
+    final ingredients = await getRecipeIngredients(id);
+    return Recipe.fromMap(maps.first, ingredients: ingredients);
+  }
+
+  Future<int> updateRecipe(Recipe recipe) async {
+    if (kIsWeb) return 0;
+    final db = await database;
+    return await db.update(
+      'recipes',
+      recipe.copyWith(updatedAt: DateTime.now()).toMap(),
+      where: 'id = ?',
+      whereArgs: [recipe.id],
+    );
+  }
+
+  Future<int> incrementRecipeUsage(int recipeId) async {
+    if (kIsWeb) return 0;
+    final db = await database;
+    return await db.rawUpdate(
+      'UPDATE recipes SET usage_count = usage_count + 1, updated_at = ? WHERE id = ?',
+      [DateTime.now().toIso8601String(), recipeId],
+    );
+  }
+
+  Future<int> deleteRecipe(int id) async {
+    if (kIsWeb) return 0;
+    final db = await database;
+    return await db.delete('recipes', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // ============================================
+  // RECIPE INGREDIENTS (Liaison Recette-Composants)
+  // ============================================
+
+  Future<int> insertRecipeIngredient(RecipeIngredient ingredient) async {
+    if (kIsWeb) return 0;
+    final db = await database;
+    return await db.insert('recipe_ingredients', ingredient.toMap());
+  }
+
+  Future<List<RecipeIngredient>> getRecipeIngredients(int recipeId) async {
+    if (kIsWeb) return [];
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.rawQuery('''
+      SELECT ri.*, c.category as component_category, c.name as component_name
+      FROM recipe_ingredients ri
+      JOIN components c ON ri.component_id = c.id
+      WHERE ri.recipe_id = ?
+    ''', [recipeId]);
+    return List.generate(maps.length, (i) => RecipeIngredient.fromMap(maps[i]));
+  }
+
+  Future<void> deleteRecipeIngredients(int recipeId) async {
+    if (kIsWeb) return;
+    final db = await database;
+    await db.delete('recipe_ingredients', where: 'recipe_id = ?', whereArgs: [recipeId]);
+  }
+
+  Future<void> replaceRecipeIngredients(int recipeId, List<RecipeIngredient> ingredients) async {
+    if (kIsWeb) return;
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('recipe_ingredients', where: 'recipe_id = ?', whereArgs: [recipeId]);
+      for (final ingredient in ingredients) {
+        await txn.insert('recipe_ingredients', ingredient.copyWith(recipeId: recipeId).toMap());
+      }
+    });
+  }
+
+  // ============================================
+  // BATCHES (Lots Fabriqués)
+  // ============================================
+
+  Future<int> insertBatch(Batch batch) async {
+    if (kIsWeb) return 0;
+    final db = await database;
+    return await db.insert('batches', batch.toMap());
+  }
+
+  Future<List<Batch>> getAllBatches() async {
+    if (kIsWeb) return [];
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'batches',
+      orderBy: 'created_at DESC',
+    );
+    return List.generate(maps.length, (i) => Batch.fromMap(maps[i]));
+  }
+
+  Future<List<Batch>> getActiveBatches() async {
+    if (kIsWeb) return [];
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'batches',
+      where: 'status = ?',
+      whereArgs: ['active'],
+      orderBy: 'created_at DESC',
+    );
+    return List.generate(maps.length, (i) => Batch.fromMap(maps[i]));
+  }
+
+  Future<List<Batch>> getBatchesForWeapon(String weaponId) async {
+    if (kIsWeb) return [];
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'batches',
+      where: 'weapon_id = ? AND status = ?',
+      whereArgs: [weaponId, 'active'],
+      orderBy: 'created_at DESC',
+    );
+    return List.generate(maps.length, (i) => Batch.fromMap(maps[i]));
+  }
+
+  Future<Batch?> getBatch(int id) async {
+    if (kIsWeb) return null;
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'batches',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    if (maps.isEmpty) return null;
+    return Batch.fromMap(maps.first);
+  }
+
+  Future<Batch?> getBatchByLotNumber(String lotNumber) async {
+    if (kIsWeb) return null;
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'batches',
+      where: 'lot_number = ?',
+      whereArgs: [lotNumber],
+    );
+    if (maps.isEmpty) return null;
+    return Batch.fromMap(maps.first);
+  }
+
+  Future<int> updateBatch(Batch batch) async {
+    if (kIsWeb) return 0;
+    final db = await database;
+    return await db.update(
+      'batches',
+      batch.copyWith(updatedAt: DateTime.now()).toMap(),
+      where: 'id = ?',
+      whereArgs: [batch.id],
+    );
+  }
+
+  Future<int> updateBatchQuantity(int batchId, int newRemaining) async {
+    if (kIsWeb) return 0;
+    final db = await database;
+    final status = newRemaining <= 0 ? 'empty' : 'active';
+    return await db.update(
+      'batches',
+      {
+        'quantity_remaining': newRemaining,
+        'status': status,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [batchId],
+    );
+  }
+
+  Future<int> deleteBatch(int id) async {
+    if (kIsWeb) return 0;
+    final db = await database;
+    return await db.delete('batches', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<String> generateNextLotNumber() async {
+    if (kIsWeb) return '1001';
+    final db = await database;
+    final result = await db.rawQuery(
+      "SELECT MAX(CAST(lot_number AS INTEGER)) as max_lot FROM batches WHERE lot_number GLOB '[0-9]*'",
+    );
+    final maxLot = result.first['max_lot'] as int? ?? 1000;
+    return (maxLot + 1).toString();
+  }
+
+  // ============================================
+  // STOCK TRANSACTIONS (Historique des Mouvements)
+  // ============================================
+
+  Future<int> insertStockTransaction(StockTransaction transaction) async {
+    if (kIsWeb) return 0;
+    final db = await database;
+    return await db.insert('stock_transactions', transaction.toMap());
+  }
+
+  Future<List<StockTransaction>> getTransactionsForComponent(int componentId, {int? limit}) async {
+    if (kIsWeb) return [];
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'stock_transactions',
+      where: 'component_id = ?',
+      whereArgs: [componentId],
+      orderBy: 'created_at DESC',
+      limit: limit,
+    );
+    return List.generate(maps.length, (i) => StockTransaction.fromMap(maps[i]));
+  }
+
+  Future<List<StockTransaction>> getTransactionsForBatch(int batchId) async {
+    if (kIsWeb) return [];
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.rawQuery('''
+      SELECT st.*, c.name as component_name
+      FROM stock_transactions st
+      JOIN components c ON st.component_id = c.id
+      WHERE st.batch_id = ?
+      ORDER BY st.created_at DESC
+    ''', [batchId]);
+    return List.generate(maps.length, (i) => StockTransaction.fromMap(maps[i]));
+  }
+
+  Future<List<StockTransaction>> getRecentTransactions({int limit = 50}) async {
+    if (kIsWeb) return [];
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.rawQuery('''
+      SELECT st.*, c.name as component_name
+      FROM stock_transactions st
+      JOIN components c ON st.component_id = c.id
+      ORDER BY st.created_at DESC
+      LIMIT ?
+    ''', [limit]);
+    return List.generate(maps.length, (i) => StockTransaction.fromMap(maps[i]));
+  }
+
+  // ============================================
+  // SESSIONS (Extensions pour Batches)
+  // ============================================
+
+  Future<List<Session>> getSessionsForBatch(int batchId) async {
+    if (kIsWeb) return [];
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'sessions',
+      where: 'batch_id = ?',
+      whereArgs: [batchId],
+      orderBy: 'created_at DESC',
+    );
+    return List.generate(maps.length, (i) => Session.fromMap(maps[i]));
+  }
+
+  Future<int> getSessionCountForBatch(int batchId) async {
+    if (kIsWeb) return 0;
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) as count FROM sessions WHERE batch_id = ?',
+      [batchId],
+    );
+    return result.first['count'] as int? ?? 0;
+  }
+
+  Future<int> getTotalShotsForBatch(int batchId) async {
+    if (kIsWeb) return 0;
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT SUM(shot_count) as total FROM sessions WHERE batch_id = ?',
+      [batchId],
+    );
+    return (result.first['total'] as int?) ?? 0;
   }
 
   // UTILITY
